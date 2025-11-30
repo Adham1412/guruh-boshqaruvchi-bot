@@ -4,7 +4,7 @@ const axios = require('axios');
 
 // --- SOZLAMALAR ---
 // Tokenni shu yerga yozing yoki Render Environment Variable ga 'BOT_TOKEN' nomi bilan qo'shing
-const BOT_TOKEN = process.env.BOT_TOKEN || '7793369152:AAG2G_m79DD0gklT3LBYuOd1FpdUR5WhMrU';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8554827007:AAFnRps45xL3A8xS9LBLRsBevEIGyACRZxQ';
 const APP_URL = process.env.RENDER_EXTERNAL_URL; // Render avtomatik beradi
 
 if (BOT_TOKEN === 'SIZNING_BOT_TOKENINGIZ_SHU_YERDA') {
@@ -323,4 +323,5 @@ bot.launch().then(() => console.log('Bot muvaffaqiyatli ishga tushdi!'));
 
 // Graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
+
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
