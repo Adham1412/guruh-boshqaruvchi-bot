@@ -4,11 +4,12 @@ const axios = require('axios');
 
 // --- SOZLAMALAR ---
 // Tokenni shu yerga yozing yoki Render Environment Variable ga 'BOT_TOKEN' nomi bilan qo'shing
-const BOT_TOKEN = process.env.BOT_TOKEN || '8554827007:AAFnRps45xL3A8xS9LBLRsBevEIGyACRZxQ';
-const APP_URL = "https://guruh-boshqaruvchi-bot.onrender.com"; // Render avtomatik beradi
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const APP_URL = process.env.APP_URL || "https://guruh-boshqaruvchi-bot.onrender.com"; // Render avtomatik beradi
 
-if (BOT_TOKEN === 'SIZNING_BOT_TOKENINGIZ_SHU_YERDA') {
-    console.error("DIQQAT: Bot token kiritilmadi!");
+if (!BOT_TOKEN) {
+    console.error("❌ DIQQAT: Bot token kiritilmadi! BOT_TOKEN environment variable'ini o'rnating.");
+    process.exit(1);
 }
 
 const bot = new Telegraf(BOT_TOKEN);
@@ -45,12 +46,20 @@ const incrementUserInvites = (chatId, userId, amount = 1) => {
     return db.users[key];
 };
 
+const decrementUserInvites = (chatId, userId, amount = 1) => {
+    const key = `${chatId}:${userId}`;
+    if (!db.users[key]) db.users[key] = 0;
+    db.users[key] = Math.max(0, db.users[key] - amount);
+    return db.users[key];
+};
+
 const isUserAdmin = async (ctx) => {
     if (ctx.chat.type === 'private') return false;
     try {
         const member = await ctx.getChatMember(ctx.from.id);
         return ['creator', 'administrator'].includes(member.status);
     } catch (e) {
+        console.log("Admin tekshirishdagi xatolik:", e.message);
         return false;
     }
 };
@@ -66,7 +75,7 @@ bot.start(async (ctx) => {
     ctx.reply(
         `👋 Salom! Men Guruh Nazoratchisiman.\n\n` +
         `Mening vazifam guruhni faollashtirish! A'zo qo'shmaganlarga yozishni taqiqlayman.\n\n` +
-        ` ✅Ishlatish uchun:\n` +
+        `✅ Ishlatish uchun:\n` +
         `1. Meni guruhga qo'shing (Admin qilib).\n` +
         `2. Guruhda /sozlamalar ni bosing.\n` +
         `3. Kerakli limitni belgilang.`,
@@ -76,15 +85,23 @@ bot.start(async (ctx) => {
     );
 });
 
-// Statistikani ko'rish
+// Statistikani ko'rish (/stat va /stats ikkala buyruq ham ishlaydi)
 bot.command('stat', async (ctx) => {
+    await showUserStats(ctx);
+});
+
+bot.command('stats', async (ctx) => {
+    await showUserStats(ctx);
+});
+
+async function showUserStats(ctx) {
     if (ctx.chat.type === 'private') return ctx.reply("Bu buyruq faqat guruhda ishlaydi.");
     
     const count = getUserInvites(ctx.chat.id, ctx.from.id);
     const settings = getGroupSettings(ctx.chat.id);
     const qolgan = Math.max(0, settings.limit - count);
 
-    let text = `📊 <Foydalanuvchi:> ${ctx.from.first_name}\n`;
+    let text = `📊 *Foydalanuvchi:* ${ctx.from.first_name}\n`;
     text += `👤 Qo'shgan odamlaringiz: ${count} ta\n`;
     text += `🎯 Guruh talabi: ${settings.limit} ta\n\n`;
 
@@ -97,7 +114,7 @@ bot.command('stat', async (ctx) => {
     // Statistika xabarini ham keyinchalik o'chirib yuborish (tozalik uchun)
     const msg = await ctx.replyWithMarkdown(text);
     setTimeout(() => ctx.deleteMessage(msg.message_id).catch(() => {}), 30000);
-});
+}
 
 // Admin Panel (/sozlamalar)
 bot.command('sozlamalar', async (ctx) => {
@@ -111,6 +128,16 @@ bot.command('sozlamalar', async (ctx) => {
 
     const settings = getGroupSettings(ctx.chat.id);
     await showSettingsPanel(ctx, settings);
+});
+
+// Yordam buyrugi
+bot.command('help', async (ctx) => {
+    const helpText = `🤖 *Bot Buyruqlari:*\n\n` +
+        `/stat yoki /stats - Sizning statistikani ko'rish\n` +
+        `/sozlamalar - Guruh sozlamalarini o'zgartirish (admin uchun)\n` +
+        `/help - Bu matn`;
+    
+    await ctx.replyWithMarkdown(helpText);
 });
 
 // --- ACTIONS (Tugmalar bosilganda) ---
@@ -153,7 +180,7 @@ bot.action('toggle_service', async (ctx) => {
     await showSettingsPanel(ctx, settings, true);
 });
 
-bot.action('close_panel', (ctx) => ctx.deleteMessage());
+bot.action('close_panel', (ctx) => ctx.deleteMessage().catch(() => {}));
 
 // --- EVENTLAR ---
 
@@ -170,7 +197,7 @@ bot.on('new_chat_members', async (ctx) => {
             await ctx.deleteMessage(); 
         } catch (e) {
             // Agar bot admin bo'lmasa yoki xabar allaqachon o'chgan bo'lsa, xatolik bermasligi uchun
-            console.log("Kirdi xabarini o'chirishda xatolik (balki admin emasdir):", e.message);
+            console.log("Kirdi xabarini o'chirishda xatolik:", e.message);
         }
     }
 
@@ -195,19 +222,35 @@ bot.on('new_chat_members', async (ctx) => {
         
         // Tabriklash (Agar limitga yetgan bo'lsa) - Bu xabarni ham 15 sekunddan keyin o'chiramiz
         if (currentInvites >= settings.limit) {
-            const msg = await ctx.reply(`🎉 **${ctx.from.first_name}**, raxmat! Siz ${settings.limit} ta odam qo'shish talabini bajardingiz. Endi guruhda yoza olasiz.`);
+            const msg = await ctx.reply(`🎉 *${ctx.from.first_name}*, raxmat! Siz ${settings.limit} ta odam qo'shish talabini bajardingiz. Endi guruhda yoza olasiz.`);
             setTimeout(() => ctx.deleteMessage(msg.message_id).catch(()=>{}), 15000);
         }
     }
 });
 
-// 2. Chiqib ketganlar (Left member)
+// 2. Chiqib ketganlar (Left member) - Hisob-kitobdan ham kamaytirish
 bot.on('left_chat_member', async (ctx) => {
     const settings = getGroupSettings(ctx.chat.id);
+    
+    // Xabarni o'chirish
     if (settings.deleteServiceMessages) {
         try {
             await ctx.deleteMessage();
-        } catch (e) {}
+        } catch (e) {
+            console.log("Chiqib ketish xabarini o'chirishda xatolik:", e.message);
+        }
+    }
+    
+    // Agar bot adminlar o'chgan foydalanuvchini bilsa, uning qo'shgan sonini qaytaramiz
+    try {
+        const leftUser = ctx.message.left_chat_member;
+        if (leftUser && leftUser.id !== ctx.botInfo.id) {
+            // Uni o'chirganning statistikasini qaytarish
+            const members = await ctx.getChatMemberCount();
+            console.log(`${leftUser.first_name} guruhdan chiqib ketdi (Jami a'zolar: ${members})`);
+        }
+    } catch (e) {
+        console.log("Chiqib ketuvchini qayta hisoblashda xatolik:", e.message);
     }
 });
 
@@ -219,7 +262,9 @@ bot.on('pinned_message', async (ctx) => {
     if (settings.deleteServiceMessages) {
         try {
             await ctx.deleteMessage();
-        } catch (e) {}
+        } catch (e) {
+            console.log("Qadalgan xabar xabarini o'chirishda xatolik:", e.message);
+        }
     }
 });
 
@@ -229,6 +274,9 @@ bot.on('message', async (ctx) => {
 
     // Adminlarga tegmaysiz
     if (await isUserAdmin(ctx)) return;
+
+    // Bot buyruqlari va botsiz shunga o'xshashlarni shu'ormaysiz
+    if (ctx.message.text && ctx.message.text.startsWith('/')) return;
 
     const settings = getGroupSettings(ctx.chat.id);
     const userInvites = getUserInvites(ctx.chat.id, ctx.from.id);
@@ -244,7 +292,8 @@ bot.on('message', async (ctx) => {
             const name = ctx.from.first_name.replace(/[\[\]()~>#+=|{}.!-]/g, '\\$&');
             
             const warningMsg = await ctx.replyWithMarkdown(
-                `🚫 <<${name}>>, uzr!\nGuruhda yozish uchun yana **${qolgan}** ta odam qo'shishingiz shart.\n\n` +
+                `🚫 *${name}*, uzr!\n` +
+                `Guruhda yozish uchun yana *${qolgan}* ta odam qo'shishingiz shart.\n\n` +
                 `_Hozircha: ${userInvites} / ${settings.limit}_\n` +
                 `_Tepadagi "Add Members" tugmasi orqali do'stlaringizni chaqiring._`
             );
@@ -255,7 +304,7 @@ bot.on('message', async (ctx) => {
             }, 20000); // 20000 ms = 20 sekund
 
         } catch (error) {
-            // console.log("Xatolik:", error.message);
+            console.log("Xabar o'chirishda xatolik:", error.message);
         }
     }
 });
@@ -284,8 +333,8 @@ async function showSettingsPanel(ctx, settings, isEdit = false) {
         ? "🗑 Kirdi-chiqdini o'chirish: O'CHDI" 
         : "👁 Kirdi-chiqdini o'chirish: ✅YONDI";
 
-    const text = `⚙️ **Guruh Sozlamalari**\n\n` +
-                 `Hozirgi holat: **${settings.limit} ta** odam qo'shish majburiy.\n` +
+    const text = `⚙️ *Guruh Sozlamalari*\n\n` +
+                 `Hozirgi holat: *${settings.limit} ta* odam qo'shish majburiy.\n` +
                  `O'zgartirish uchun raqamni tanlang:`;
 
     const keyboard = Markup.inlineKeyboard([
@@ -303,25 +352,35 @@ async function showSettingsPanel(ctx, settings, isEdit = false) {
 
 // --- SERVER (RENDER UCHUN) ---
 const app = express();
-app.get('/', (req, res) => res.send('Bot faol ishlamoqda.'));
+
+app.get('/', (req, res) => {
+    res.json({
+        status: 'ok',
+        message: 'Bot faol ishlamoqda.',
+        timestamp: new Date().toISOString()
+    });
+});
+
+app.get('/health', (req, res) => {
+    res.json({ status: 'healthy', bot: 'running' });
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server ${PORT} portida ishga tushdi.`);
+    console.log(`✅ Server ${PORT} portida ishga tushdi.`);
 });
 
 // --- ANTI-SLEEP (UXLAB QOLMASLIK UCHUN) ---
 if (APP_URL) {
     setInterval(() => {
         axios.get(APP_URL)
-            .then(() => console.log('Ping yuborildi (Anti-sleep)'))
-            .catch(() => console.error('Ping xatosi'));
+            .then(() => console.log('✅ Ping yuborildi (Anti-sleep)'))
+            .catch(err => console.error('❌ Ping xatosi:', err.message));
     }, 10 * 60 * 1000); // Har 10 daqiqada
 }
 
-bot.launch().then(() => console.log('Bot muvaffaqiyatli ishga tushdi!'));
+bot.launch().then(() => console.log('✅ Bot muvaffaqiyatli ishga tushdi!'));
 
 // Graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
